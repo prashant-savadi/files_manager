@@ -1,7 +1,42 @@
+import re
 import hashlib
 import logging
 import os
 import sys
+
+def compile_ignore_patterns(pattern_str):
+    """Compiles a comma-separated string of regex patterns."""
+    if not pattern_str:
+        return []
+    patterns = []
+    for p in pattern_str.split(','):
+        p = p.strip()
+        if p:
+            try:
+                patterns.append(re.compile(p))
+            except re.error as e:
+                logging.getLogger("files_manager").error(f"Invalid regex pattern '{p}': {e}")
+    return patterns
+
+def should_ignore(path, ignore_regexes):
+    """Checks if a path matches any of the compiled regex patterns."""
+    if not ignore_regexes:
+        return False
+    # Check against the filename or full path? 
+    # Usually recursive tools check base name, but sometimes full path.
+    # Requirement says "regex", usually applied to the relative path or name.
+    # Let's check both the full name of the file/dir and the full path for maximum flexibility.
+    # But usually people supply ".git" or "*.pyc". 
+    # Let's match against the basename (filename) as it's most common for "patterns".
+    name = os.path.basename(path)
+    for regex in ignore_regexes:
+        if regex.search(name):
+            return True
+        # Also maintain support for checking full path if pattern contains path separators (heuristic) or just always check?
+        # A simple "search" on the full path is often what "ignore patterns" implies if the regex is complex.
+        if regex.search(path):
+            return True
+    return False
 
 def setup_logger(name="files_manager", log_file=None, level=logging.INFO):
     """Sets up a logger that writes to console and optionally to a file."""

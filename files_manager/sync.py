@@ -4,15 +4,18 @@ import concurrent.futures
 import threading
 import json
 import logging
-from files_manager.utils import get_file_hash, get_file_info
+from files_manager.utils import get_file_hash, get_file_info, should_ignore
 
 logger = logging.getLogger("files_manager")
 
-def _process_file_node(abs_path, base_dir, cache, deep_scan):
+def _process_file_node(abs_path, base_dir, cache, deep_scan, ignore_regexes=None):
     """
     Helper to process a single file node. 
     Returns: (rel_path, metadata_dict, file_to_hash_entry_or_None)
     """
+    if should_ignore(abs_path, ignore_regexes):
+        return None, None, None
+
     rel_path = os.path.relpath(abs_path, base_dir)
     
     if not deep_scan:
@@ -44,17 +47,24 @@ def _process_file_node(abs_path, base_dir, cache, deep_scan):
 def _scan_subtree(args):
     """
     Worker function to scan a subdirectory recursively.
-    args: (base_dir, subdir_path, cache, deep_scan)
+    args: (base_dir, subdir_path, cache, deep_scan, ignore_regexes)
     """
-    base_dir, subdir_path, cache, deep_scan = args
+    base_dir, subdir_path, cache, deep_scan, ignore_regexes = args
     scan_result = {}
     files_to_hash = []
     
     try:
+        # Check if subdir itself should be ignored
+        if should_ignore(subdir_path, ignore_regexes):
+            return scan_result, files_to_hash
+
         for root, _, files in os.walk(subdir_path):
+            if should_ignore(root, ignore_regexes):
+                continue
+
             for filename in files:
                 abs_path = os.path.join(root, filename)
-                rel_val, meta_val, hash_entry = _process_file_node(abs_path, base_dir, cache, deep_scan)
+                rel_val, meta_val, hash_entry = _process_file_node(abs_path, base_dir, cache, deep_scan, ignore_regexes)
                 
                 if rel_val is not None:
                     scan_result[rel_val] = meta_val
@@ -65,7 +75,7 @@ def _scan_subtree(args):
         
     return scan_result, files_to_hash
 
-def scan_directory(directory, cache=None, deep_scan=True):
+def scan_directory(directory, cache=None, deep_scan=True, ignore_regexes=None):
     """
     Scans directory and builds a dictionary: { relative_path: {mtime, size, hash} }
     Uses cache to avoid re-hashing if mtime/size haven't changed.
@@ -98,7 +108,7 @@ def scan_directory(directory, cache=None, deep_scan=True):
 
     # 1. Process Root Files (Sequential)
     for abs_path in root_files:
-        rel_val, meta_val, hash_entry = _process_file_node(abs_path, directory, cache, deep_scan)
+        rel_val, meta_val, hash_entry = _process_file_node(abs_path, directory, cache, deep_scan, ignore_regexes)
         if rel_val is not None:
             scan_result[rel_val] = meta_val
             if hash_entry:
@@ -106,9 +116,9 @@ def scan_directory(directory, cache=None, deep_scan=True):
 
     # 2. Process Subdirectories (Parallel)
     if subdirs:
-        # Prepare arguments: (base_dir, subdir_to_walk, cache, deep_scan)
+        # Prepare arguments: (base_dir, subdir_to_walk, cache, deep_scan, ignore_regexes)
         # Note: 'cache' is passed by reference (read-only usage is safe)
-        task_args = [(directory, sd, cache, deep_scan) for sd in subdirs]
+        task_args = [(directory, sd, cache, deep_scan, ignore_regexes) for sd in subdirs]
         
         with concurrent.futures.ThreadPoolExecutor() as executor:
             future_results = executor.map(_scan_subtree, task_args)
@@ -141,7 +151,7 @@ def scan_directory(directory, cache=None, deep_scan=True):
 
     return scan_result
 
-def sync_directories(source_dir, dest_dir, cache_file=None, dry_run=False, deep_scan=False):
+def sync_directories(source_dir, dest_dir, cache_file=None, dry_run=False, deep_scan=False, ignore_patterns=None):
     """
     Syncs source_dir to dest_dir. 
     Copies files from source that are missing or different in dest.
@@ -182,14 +192,14 @@ def sync_directories(source_dir, dest_dir, cache_file=None, dry_run=False, deep_
 
     # Scan both directories
     logger.info(f"Analyzing source directory... (Deep Scan: {deep_scan})")
-    current_source_state = scan_directory(source_dir, source_cache, deep_scan=deep_scan)
+    current_source_state = scan_directory(source_dir, source_cache, deep_scan=deep_scan, ignore_regexes=ignore_patterns)
     
     # For dest, if dry run and dest doesn't exist, it's empty
     if dry_run and not os.path.exists(dest_dir):
         current_dest_state = {}
     else:
         logger.info("Analyzing destination directory...")
-        current_dest_state = scan_directory(dest_dir, dest_cache, deep_scan=deep_scan)
+        current_dest_state = scan_directory(dest_dir, dest_cache, deep_scan=deep_scan, ignore_regexes=ignore_patterns)
 
     files_copied = 0
     

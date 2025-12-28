@@ -3,11 +3,11 @@ import json
 import logging
 import concurrent.futures
 from collections import defaultdict
-from files_manager.utils import get_file_hash, get_file_info, format_size
+from files_manager.utils import get_file_hash, get_file_info, format_size, should_ignore
 
 logger = logging.getLogger("files_manager")
 
-def find_duplicates(directory):
+def find_duplicates(directory, ignore_regexes=None):
     """
     Scans a directory recursively to find duplicate files.
     Returns a list of dictionaries representing duplicate groups.
@@ -21,8 +21,17 @@ def find_duplicates(directory):
     size_groups = defaultdict(list)
     try:
         for root, _, files in os.walk(directory):
+            # Optimistically skip directories if they match ignore pattern? 
+            # os.walk allows modifying 'dirs' in-place to skip, but here we iterate 'files'.
+            # Let's check root/directory-name matching?
+            if should_ignore(root, ignore_regexes):
+                continue
+                
             for filename in files:
                 filepath = os.path.join(root, filename)
+                if should_ignore(filepath, ignore_regexes):
+                    continue
+
                 info = get_file_info(filepath)
                 if info:
                     size_groups[info['size']].append(filepath)
@@ -143,7 +152,7 @@ def delete_duplicates(duplicates_data, dry_run=False):
         logger.info(f"Deletion complete. Deleted {deleted_count} files. Freed {format_size(space_freed)}.")
     return deleted_count, space_freed
 
-def handle_duplicates_task(directory=None, input_json=None, output_json=None, delete=False, dry_run=False):
+def handle_duplicates_task(directory=None, input_json=None, output_json=None, delete=False, dry_run=False, ignore_patterns=None):
     """
     Main handler for duplicacy task.
     """
@@ -159,7 +168,7 @@ def handle_duplicates_task(directory=None, input_json=None, output_json=None, de
             logger.error(f"Failed to load input JSON {input_json}: {e}")
             return
     elif directory:
-        duplicates_data = find_duplicates(directory)
+        duplicates_data = find_duplicates(directory, ignore_regexes=ignore_patterns)
     else:
         logger.error("No directory or input JSON provided.")
         return

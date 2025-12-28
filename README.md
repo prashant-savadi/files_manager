@@ -22,10 +22,9 @@ A powerful, efficient Python CLI tool for managing files. It helps you identify 
 3.  **Advanced Logging**
     *   Tracks Script Start Time, End Time, and Total Duration.
     *   Creates unique timestamped logs for every run (e.g., `logs/files_manager_20251225_001230.log`).
-26: 
-27: 4.  **Multi-Language Support**
-28:     *   Full support for **UTF-8** filenames and paths (e.g., Hindi, Kannada, etc.).
-29:     *   Logs and JSON reports correctly handle non-English characters.
+4.  **Multi-Language Support**
+    *   Full support for **UTF-8** filenames and paths (e.g., Hindi, Kannada, etc.).
+    *   Logs and JSON reports correctly handle non-English characters.
 
 ## Requirements
 
@@ -43,10 +42,11 @@ Run the tool from the root directory using `python -m files_manager.main`.
 | Argument | Description |
 | :--- | :--- |
 | `-p, --path <dir>` | The directory to scan for duplicates. |
-| `-o, --output-json <file>` | (Optional) Save the scan results to a JSON file. |
+| `-o, --output-json <file>` | (Optional) Save the scan results to a JSON file. Defaults to `out_<timestamp>.json` if not specified. |
 | `-i, --input-json <file>` | (Optional) Load duplicate data from an existing JSON report instead of scanning. |
 | `-d, --delete` | (Optional) Delete the identified duplicate files. |
 | `--dry-run` | (Optional) Simulate the deletion process without actually deleting files. |
+| `--ignore-patterns <patterns>` | (Optional) Comma-separated regex patterns to ignore files/directories (e.g., `.*\.log,temp_.*`). |
 
 #### Examples
 
@@ -79,6 +79,7 @@ python -m files_manager.main duplicates --path "./downloads" --delete
 | `-c, --cache <file>` | (Optional) Path to the cache file. Defaults to `sync_cache.json`. |
 | `--enable_deep_scan` | (Optional) Enable deep scan (content hash check). Default is shallow scan (names only). |
 | `--dry-run` | (Optional) Simulate operations without copying files. |
+| `--ignore-patterns <patterns>` | (Optional) Comma-separated regex patterns to ignore files/directories. |
 
 #### Examples
 
@@ -96,6 +97,11 @@ python -m files_manager.main sync "./projects" "D:/backup/projects" --enable_dee
 **Preview sync changes (Dry Run):**
 ```bash
 python -m files_manager.main sync "./projects" "D:/backup/projects" --dry-run
+```
+
+**Sync with ignore patterns (Multiple Regexes):**
+```bash
+python -m files_manager.main sync "./projects" "D:/backup/projects" --ignore-patterns "\.git,node_modules,.*\.log,temp_.*"
 ```
 
 ## Logs
