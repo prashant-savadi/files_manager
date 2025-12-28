@@ -5,6 +5,21 @@ import sys
 
 def setup_logger(name="files_manager", log_file=None, level=logging.INFO):
     """Sets up a logger that writes to console and optionally to a file."""
+    
+    # Configure stdout/stderr to handle UTF-8 if they aren't already
+    if sys.stdout and sys.stdout.encoding.lower() != 'utf-8':
+        try:
+            sys.stdout.reconfigure(encoding='utf-8')
+        except AttributeError:
+             # Python < 3.7 or other environments where reconfigure is not available
+            pass
+
+    if sys.stderr and sys.stderr.encoding.lower() != 'utf-8':
+        try:
+            sys.stderr.reconfigure(encoding='utf-8')
+        except AttributeError:
+            pass
+            
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     
     logger = logging.getLogger(name)
@@ -17,7 +32,7 @@ def setup_logger(name="files_manager", log_file=None, level=logging.INFO):
     
     # File handler
     if log_file:
-        fh = logging.FileHandler(log_file)
+        fh = logging.FileHandler(log_file, encoding='utf-8')
         fh.setFormatter(formatter)
         logger.addHandler(fh)
         

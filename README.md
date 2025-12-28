@@ -13,7 +13,7 @@ A powerful, efficient Python CLI tool for managing files. It helps you identify 
 
 2.  **Directory Synchronizer**
     *   One-way synchronization (Source -> Destination).
-    *   **Parallel Scanning**: Uses **Multiprocessing** to calculate hashes for new/modified files in parallel, drastically reducing scan times.
+    *   **Parallel Scanning**: Uses **Multithreading** to traverse directory structures in parallel and **Multiprocessing** to calculate hashes, drastically reducing scan times for large and nested directory trees.
     *   **Fast Syncing**: Uses **Multithreaded** copying to maximize network/disk I/O.
     *   **Resumable & Robust**: Updates the cache on-the-fly. If the process is interrupted, next run naturally resumes from where it left off.
     *   **Smart Caching**: Tracks files to avoid re-hashing unchanged content.
@@ -22,6 +22,10 @@ A powerful, efficient Python CLI tool for managing files. It helps you identify 
 3.  **Advanced Logging**
     *   Tracks Script Start Time, End Time, and Total Duration.
     *   Creates unique timestamped logs for every run (e.g., `logs/files_manager_20251225_001230.log`).
+26: 
+27: 4.  **Multi-Language Support**
+28:     *   Full support for **UTF-8** filenames and paths (e.g., Hindi, Kannada, etc.).
+29:     *   Logs and JSON reports correctly handle non-English characters.
 
 ## Requirements
 
@@ -73,6 +77,7 @@ python -m files_manager.main duplicates --path "./downloads" --delete
 | `source` | The source directory path. |
 | `dest` | The destination directory path. |
 | `-c, --cache <file>` | (Optional) Path to the cache file. Defaults to `sync_cache.json`. |
+| `--enable_deep_scan` | (Optional) Enable deep scan (content hash check). Default is shallow scan (names only). |
 | `--dry-run` | (Optional) Simulate operations without copying files. |
 
 #### Examples
@@ -82,6 +87,11 @@ python -m files_manager.main duplicates --path "./downloads" --delete
 python -m files_manager.main sync "./projects" "D:/backup/projects"
 ```
 *(This creates/updates `sync_cache.json` in the current directory and updates it continuously)*
+**Sync with Deep Scan (Check content changes):**
+```bash
+python -m files_manager.main sync "./projects" "D:/backup/projects" --enable_deep_scan
+```
+*(Use this when you suspect file contents have changed, not just new files added)*
 
 **Preview sync changes (Dry Run):**
 ```bash

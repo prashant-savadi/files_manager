@@ -8,10 +8,68 @@ from files_manager.utils import get_file_hash, get_file_info
 
 logger = logging.getLogger("files_manager")
 
-def scan_directory(directory, cache=None):
+def _process_file_node(abs_path, base_dir, cache, deep_scan):
+    """
+    Helper to process a single file node. 
+    Returns: (rel_path, metadata_dict, file_to_hash_entry_or_None)
+    """
+    rel_path = os.path.relpath(abs_path, base_dir)
+    
+    if not deep_scan:
+        return rel_path, {}, None
+
+    info = get_file_info(abs_path)
+    if not info:
+        return None, None, None
+
+    cached_file = cache.get(rel_path)
+    # Safely check cache
+    if (cached_file and 
+        cached_file.get('size') == info['size'] and 
+        cached_file.get('mtime') and
+        abs(cached_file['mtime'] - info['mtime']) < 0.001):
+        
+        return rel_path, {
+            'mtime': info['mtime'],
+            'size': info['size'],
+            'hash': cached_file.get('hash')
+        }, None
+    else:
+        return rel_path, {
+            'mtime': info['mtime'],
+            'size': info['size'],
+            'hash': None
+        }, (rel_path, abs_path)
+
+def _scan_subtree(args):
+    """
+    Worker function to scan a subdirectory recursively.
+    args: (base_dir, subdir_path, cache, deep_scan)
+    """
+    base_dir, subdir_path, cache, deep_scan = args
+    scan_result = {}
+    files_to_hash = []
+    
+    try:
+        for root, _, files in os.walk(subdir_path):
+            for filename in files:
+                abs_path = os.path.join(root, filename)
+                rel_val, meta_val, hash_entry = _process_file_node(abs_path, base_dir, cache, deep_scan)
+                
+                if rel_val is not None:
+                    scan_result[rel_val] = meta_val
+                    if hash_entry:
+                        files_to_hash.append(hash_entry)
+    except Exception as e:
+        logger.error(f"Error scanning subtree {subdir_path}: {e}")
+        
+    return scan_result, files_to_hash
+
+def scan_directory(directory, cache=None, deep_scan=True):
     """
     Scans directory and builds a dictionary: { relative_path: {mtime, size, hash} }
     Uses cache to avoid re-hashing if mtime/size haven't changed.
+    Uses Multithreading for directory traversal.
     """
     logger.info(f"Scanning directory: {directory}")
     scan_result = {}
@@ -20,41 +78,44 @@ def scan_directory(directory, cache=None):
 
     cache = cache or {}
     files_to_hash = []
-    
-    # Pass 1: Collect files and check cache
-    try:
-        for root, _, files in os.walk(directory):
-            for filename in files:
-                abs_path = os.path.join(root, filename)
-                rel_path = os.path.relpath(abs_path, directory) # Key for comparison
-                
-                info = get_file_info(abs_path)
-                if not info:
-                    continue
 
-                # Check cache
-                cached_file = cache.get(rel_path)
-                if (cached_file and 
-                    cached_file['size'] == info['size'] and 
-                    abs(cached_file['mtime'] - info['mtime']) < 0.001):
-                    # Use cached hash
-                    scan_result[rel_path] = {
-                        'mtime': info['mtime'],
-                        'size': info['size'],
-                        'hash': cached_file.get('hash')
-                    }
-                else:
-                    # Mark for hashing
-                    scan_result[rel_path] = {
-                        'mtime': info['mtime'],
-                        'size': info['size'],
-                        'hash': None # Placeholder
-                    }
-                    files_to_hash.append((rel_path, abs_path))
-                    
+    # Identify Top-Level Items
+    try:
+        items = os.listdir(directory)
     except Exception as e:
-        logger.error(f"Error walking directory {directory}: {e}")
+        logger.error(f"Error listing directory {directory}: {e}")
         return {}
+
+    subdirs = []
+    root_files = []
+
+    for item in items:
+        abs_path = os.path.join(directory, item)
+        if os.path.isdir(abs_path):
+            subdirs.append(abs_path)
+        elif os.path.isfile(abs_path):
+            root_files.append(abs_path)
+
+    # 1. Process Root Files (Sequential)
+    for abs_path in root_files:
+        rel_val, meta_val, hash_entry = _process_file_node(abs_path, directory, cache, deep_scan)
+        if rel_val is not None:
+            scan_result[rel_val] = meta_val
+            if hash_entry:
+                files_to_hash.append(hash_entry)
+
+    # 2. Process Subdirectories (Parallel)
+    if subdirs:
+        # Prepare arguments: (base_dir, subdir_to_walk, cache, deep_scan)
+        # Note: 'cache' is passed by reference (read-only usage is safe)
+        task_args = [(directory, sd, cache, deep_scan) for sd in subdirs]
+        
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future_results = executor.map(_scan_subtree, task_args)
+            
+            for res_dict, res_list in future_results:
+                scan_result.update(res_dict)
+                files_to_hash.extend(res_list)
 
     # Pass 2: Parallel Hash Calculation for cache misses
     if files_to_hash:
@@ -80,7 +141,7 @@ def scan_directory(directory, cache=None):
 
     return scan_result
 
-def sync_directories(source_dir, dest_dir, cache_file=None, dry_run=False):
+def sync_directories(source_dir, dest_dir, cache_file=None, dry_run=False, deep_scan=False):
     """
     Syncs source_dir to dest_dir. 
     Copies files from source that are missing or different in dest.
@@ -109,7 +170,7 @@ def sync_directories(source_dir, dest_dir, cache_file=None, dry_run=False):
     cache_data = {}
     if cache_file and os.path.exists(cache_file):
         try:
-            with open(cache_file, 'r') as f:
+            with open(cache_file, 'r', encoding='utf-8') as f:
                 cache_data = json.load(f)
             logger.info("Loaded previous sync cache.")
         except Exception as e:
@@ -120,15 +181,15 @@ def sync_directories(source_dir, dest_dir, cache_file=None, dry_run=False):
     dest_cache = cache_data.get('dest', {})
 
     # Scan both directories
-    logger.info("Analyzing source directory...")
-    current_source_state = scan_directory(source_dir, source_cache)
+    logger.info(f"Analyzing source directory... (Deep Scan: {deep_scan})")
+    current_source_state = scan_directory(source_dir, source_cache, deep_scan=deep_scan)
     
     # For dest, if dry run and dest doesn't exist, it's empty
     if dry_run and not os.path.exists(dest_dir):
         current_dest_state = {}
     else:
         logger.info("Analyzing destination directory...")
-        current_dest_state = scan_directory(dest_dir, dest_cache)
+        current_dest_state = scan_directory(dest_dir, dest_cache, deep_scan=deep_scan)
 
     files_copied = 0
     
@@ -142,8 +203,8 @@ def sync_directories(source_dir, dest_dir, cache_file=None, dry_run=False):
                     'dest': current_dest_state 
                 }
                 try:
-                    with open(cache_file, 'w') as f:
-                        json.dump(new_cache, f, indent=4)
+                    with open(cache_file, 'w', encoding='utf-8') as f:
+                        json.dump(new_cache, f, indent=4, ensure_ascii=False)
                 except Exception as e:
                     logger.error(f"Failed to write cache file: {e}")
 
@@ -156,10 +217,10 @@ def sync_directories(source_dir, dest_dir, cache_file=None, dry_run=False):
         reason = ""
         should_copy = False
 
-        if not dest_meta:
+        if dest_meta is None:
             should_copy = True
             reason = "Missing in destination"
-        elif dest_meta['hash'] != src_meta['hash']:
+        elif deep_scan and (dest_meta.get('hash') != src_meta.get('hash')):
             should_copy = True
             reason = "Content mismatch"
         

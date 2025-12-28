@@ -153,7 +153,7 @@ def handle_duplicates_task(directory=None, input_json=None, output_json=None, de
     if input_json:
         logger.info(f"Loading duplicate data from {input_json}")
         try:
-            with open(input_json, 'r') as f:
+            with open(input_json, 'r', encoding='utf-8') as f:
                 duplicates_data = json.load(f)
         except Exception as e:
             logger.error(f"Failed to load input JSON {input_json}: {e}")
@@ -172,8 +172,8 @@ def handle_duplicates_task(directory=None, input_json=None, output_json=None, de
     # Output JSON if requested
     if output_json:
         try:
-            with open(output_json, 'w') as f:
-                json.dump(duplicates_data, f, indent=4)
+            with open(output_json, 'w', encoding='utf-8') as f:
+                json.dump(duplicates_data, f, indent=4, ensure_ascii=False)
             logger.info(f"Report saved to {output_json}")
         except Exception as e:
             logger.error(f"Failed to save output JSON {output_json}: {e}")
